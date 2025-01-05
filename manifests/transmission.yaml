@@ -1,0 +1,200 @@
+# Transmission Bittorrent client on Kubernetes
+# This is mostly an adaptation of the linuxserver/transmission docs for docker-compose.
+# Kubernetes storage configuration is a pain in the butt so this uses basic NFS by default.
+# You will probably get your account deleted if you deploy this on a public cloud provider's K8s.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: torrents-pv
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  capacity:
+    storage: 1024Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: nfs
+  nfs:
+    path: /NFS_SHARE_ROOT/transmission/downloads
+    server: NFS_SERVER_IP_ADDRESS
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: transmission-config-pv
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  capacity:
+    storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: nfs
+  nfs:
+    path: /NFS_SHARE_ROOT/transmission/configs
+    server: NFS_SERVER_IP_ADDRESS
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: transmission-watch-pv
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  capacity:
+    storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: nfs
+  nfs:
+    path: /NFS_SHARE_ROOT/transmission/watch
+    server: NFS_SERVER_IP_ADDRESS
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: torrents-pv-claim
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  volumeName: transmission-pv
+  resources:
+    requests:
+      storage: 1024Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transmission-config-pv-claim
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  volumeName: transmission-config-pv
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transmission-watch-pv-claim
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  volumeName: transmission-watch-pv
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transmission
+  namespace: default
+  labels:
+    app: transmission
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transmission
+  template:
+    metadata:
+      labels:
+        app: transmission
+    spec:
+      volumes:
+        - name: torrents-vol
+          persistentVolumeClaim:
+            claimName: torrents-pv-claim
+        - name: config-vol
+          persistentVolumeClaim:
+            claimName: transmission-config-pv-claim
+        - name: watch-vol
+          persistentVolumeClaim:
+            claimName: transmission-watch-pv-claim
+      containers:
+        - image: linuxserver/transmission:latest
+          name: transmission
+          imagePullPolicy: IfNotPresent
+          env:
+            # default for most Linux distros, MacOS might need 501/20
+            # Wintoddlers should install WSL2/WSLg to get a real OS
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: "YOUR_TIME_ZONE"
+          ports:
+            - containerPort: 9091
+            - containerPort: 51413
+          volumeMounts:
+            - name: torrents-vol
+              mountPath: /downloads
+            - name: config-vol
+              mountPath: /config
+            - name: watch-vol
+              mountPath: /watch
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: transmission
+  name: transmission
+  namespace: default
+spec:
+  ports:
+    - port: 51413
+      nodePort: 32000
+      protocol: TCP
+      targetPort: 51413
+      name: bittorrent-tcp
+    - port: 51413
+      nodePort: 32001
+      protocol: UDP
+      targetPort: 51413
+      name: bittorrent-udp
+  selector:
+    app: transmission
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: transmission
+  name: transmission-admin
+  namespace: default
+spec:
+  ports:
+    # this should actually not be exposed externally for any reason
+    # it's an HTTP XMLRPC / webui port
+    # just use kubectl port-forward
+    - port: 9091
+      protocol: TCP
+      targetPort: 9091
+      name: transmission-rpc-admin
+  selector:
+    app: transmission
+  type: ClusterIP
