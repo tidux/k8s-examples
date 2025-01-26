@@ -1,0 +1,147 @@
+# Suwayomi manga management software on kubernetes
+# This is based on the upstream Docker Compose settings.
+# Kubernetes storage configuration is a pain in the butt so this uses basic NFS by default.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: suwayomi-downloads-pv
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  capacity:
+    storage: 1024Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: nfs
+  nfs:
+    path: /path/to/NFS/volume/suwayomi/downloads
+    server: <NFS_SERVER_IP>
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: suwayomi-files-pv
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  capacity:
+    storage: 1024Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: nfs
+  nfs:
+    path: /path/to/NFS/volume/suwayomi/files
+    server: <NFS_SERVER_IP>
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: suwayomi-downloads-pv-claim
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  volumeName: suwayomi-downloads-pv
+  resources:
+    requests:
+      storage: 1024Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: suwayomi-files-pv-claim
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  volumeName: suwayomi-files-pv
+  resources:
+    requests:
+      storage: 1024Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suwayomi
+  namespace: default
+  labels:
+    app: suwayomi
+spec:
+  selector:
+    matchLabels:
+      app: suwayomi
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: suwayomi
+      labels:
+        app: suwayomi
+    spec:
+      volumes:
+        - name: suwayomi-downloads-vol
+          persistentVolumeClaim:
+            claimName: suwayomi-downloads-pv-claim
+        - name: suwayomi-files-vol
+          persistentVolumeClaim:
+            claimName: suwayomi-files-pv-claim
+      containers:
+        - name: suwayomi
+          image: ghcr.io/suwayomi/tachidesk:stable
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: "US/Pacific"
+            - name: AUTO_DOWNLOAD_CHAPTERS
+              value: "true"
+          ports:
+            - containerPort: 4567
+              name: suwayomi
+          volumeMounts:
+            - name: suwayomi-downloads-vol
+              mountPath: /home/suwayomi/.local/share/Tachidesk/downloads
+            - name: suwayomi-files-vol
+              mountPath: /home/suwayomi/.local/share/Tachidesk
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: suwayomi
+  name: suwayomi
+  namespace: default
+spec:
+  ports:
+    - port: 4567
+      protocol: TCP
+      targetPort: 4567
+      name: suwayomi-webui-port
+  selector:
+    app: suwayomi
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: suwayomi-webui
+spec:
+  defaultBackend:
+    service:
+      name: suwayomi
+      port:
+        number: 4567
+  tls:
+    - hosts:
+        - suwayomi
