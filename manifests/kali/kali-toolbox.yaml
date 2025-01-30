@@ -1,0 +1,29 @@
+# Bastion Pod based on Kali Linux
+# The nominal "service" provided is just a generic "webserver up" page.
+# The real point of this is to provide a shell accessible via "kubectl exec"
+# which has a full suite of debugging/testing tools rather than just busybox.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kali
+  namespace: default
+  labels:
+    app: kali
+spec:
+  selector:
+    matchLabels:
+      app: kali
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: kali
+      labels:
+        app: kali
+    spec:
+      containers:
+        - name: kali
+          image: <your docker registry>/kali:latest
+          imagePullPolicy: IfNotPresent
+          env:
